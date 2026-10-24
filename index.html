@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <!-- Modalità Web App a tutto schermo su iPadOS / iOS -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Contasecondi">
+  <title>Contasecondi Piscina</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --dial-bg: #ffffff;
+      --dial-border: #1e293b;
+      --dial-text: #0f172a;
+    }
+    body.dark-mode {
+      --bg: #000000;
+      --dial-bg: #090d16;
+      --dial-border: #334155;
+      --dial-text: #f8fafc;
+    }
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
+      background: var(--bg);
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      touch-action: manipulation;
+    }
+    canvas {
+      /* Occupa sempre il massimo spazio possibile su iPad sia in verticale che orizzontale */
+      width: 96vmin;
+      height: 96vmin;
+      border-radius: 50%;
+      box-shadow: 0 15px 50px rgba(0, 0, 0, 0.65);
+    }
+    /* Piccolo indicatore in angolo per lo stato dello Schermo Sempre Acceso */
+    #status-pill {
+      position: fixed;
+      bottom: 14px;
+      right: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.8);
+      color: #facc15;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      pointer-events: none;
+      transition: opacity 0.6s ease, color 0.3s ease;
+    }
+    #status-pill.active {
+      color: #4ade80;
+      opacity: 0.45; /* Si attenua per non disturbare la vista in vasca */
+    }
+  </style>
+</head>
+<body>
+
+  <canvas id="paceClock" width="1200" height="1200"></canvas>
+  <div id="status-pill">Tocca lo schermo per bloccare lo standby</div>
+
+  <script>
+    const canvas = document.getElementById('paceClock');
+    const ctx = canvas.getContext('2d');
+    const statusPill = document.getElementById('status-pill');
+
+    // 1. GESTIONE SCHERMO SEMPRE ACCESO (Screen Wake Lock API)
+    let wakeLock = null;
+
+    async function enableWakeLock() {
+      if ('wakeLock' in navigator) {
+        try {
+          if (!wakeLock) {
+            wakeLock = await navigator.wakeLock.request('screen');
+            statusPill.textContent = '● Schermo Sempre Acceso';
+            statusPill.classList.add('active');
+
+            wakeLock.addEventListener('release', () => {
+              wakeLock = null;
+              statusPill.textContent = 'Tocca per riattivare Schermo Acceso';
+              statusPill.classList.remove('active');
+            });
+          }
+        } catch (err) {
+          statusPill.textContent = 'Imposta Blocco Automatico: Mai su iPad';
+        }
+      } else {
+        statusPill.textContent = 'Su iPad: Impostazioni > Schermo > Blocco: Mai';
+      }
+    }
+
+    // Safari su iPad richiede un primo tocco dell'utente per attivare il Wake Lock
+    window.addEventListener('touchstart', enableWakeLock, { passive: true });
+    window.addEventListener('mousedown', enableWakeLock);
+
+    // Se riduci a icona e poi riapri la pagina, riattiva in automatico il Wake Lock
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        enableWakeLock();
+      }
+    });
+
+    // 2. DOPPIO TOCCO PER CAMBIARE SFONDO (BIANCO / NERO)
+    let lastTap = 0;
+    window.addEventListener('touchend', (e) => {
+      const now = Date.now();
+      if (now - lastTap < 300) {
+        document.body.classList.toggle('dark-mode');
+        e.preventDefault();
+      }
+      lastTap = now;
+    }, { passive: false });
+
+    window.addEventListener('dblclick', () => {
+      document.body.classList.toggle('dark-mode');
+    });
+
+    // 3. DISEGNO DEL CONTASECONDI SINCRONIZZATO UTC A 60 FPS
+    function drawClock() {
+      // Legge i millisecondi universali (UTC): identici su tutti i dispositivi
+      const msInMinute = Date.now() % 60000;
+      const isDark = document.body.classList.contains('dark-mode');
+
+      const w = canvas.width;
+      const h = canvas.height;
+      const cx = w / 2;
+      const cy = h / 2;
+      const radius = w * 0.465;
+
+      ctx.clearRect(0, 0, w, h);
+
+      // Sfondo circolare
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius + 22, 0, Math.PI * 2);
+      ctx.fillStyle = isDark ? '#090d16' : '#ffffff';
+      ctx.fill();
+      ctx.lineWidth = 18;
+      ctx.strokeStyle = isDark ? '#334155' : '#1e293b';
+      ctx.stroke();
+
+      // Tacche dei 60 secondi e numeri grandi
+      for (let i = 1; i <= 60; i++) {
+        const angle = (i / 60) * Math.PI * 2 - Math.PI / 2;
+        const isFifth = i % 5 === 0;
+        const isQuarter = i % 15 === 0;
+
+        const outerR = radius;
+        const innerR = isQuarter ? radius - 52 : (isFifth ? radius - 38 : radius - 20);
+
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(angle) * innerR, cy + Math.sin(angle) * innerR);
+        ctx.lineTo(cx + Math.cos(angle) * outerR, cy + Math.sin(angle) * outerR);
+        ctx.lineWidth = isQuarter ? 12 : (isFifth ? 8 : 3.5);
+        ctx.strokeStyle = isQuarter ? '#ef4444' : (isDark ? '#f8fafc' : '#0f172a');
+        ctx.stroke();
+
+        // Numeri ogni 5 secondi ad alta leggibilità da lontano
+        if (isFifth) {
+          const textR = radius - 108;
+          const tx = cx + Math.cos(angle) * textR;
+          const ty = cy + Math.sin(angle) * textR;
+          ctx.font = isQuarter ? '900 82px -apple-system, sans-serif' : '800 66px -apple-system, sans-serif';
+          ctx.fillStyle = isQuarter ? '#ef4444' : (isDark ? '#f8fafc' : '#0f172a');
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(i.toString(), tx, ty);
+        }
+      }
+
+      // Croce a 4 lancette colorate (Rossa, Gialla, Verde, Blu)
+      const baseAngle = (msInMinute / 60000) * Math.PI * 2 - Math.PI / 2;
+      const hands = [
+        { color: '#ef4444', offset: 0 },                // Rossa (allineata al secondo esatto UTC)
+        { color: '#eab308', offset: Math.PI / 2 },      // Gialla (+15s)
+        { color: '#22c55e', offset: Math.PI },          // Verde (+30s)
+        { color: '#3b82f6', offset: (3 * Math.PI) / 2 } // Blu (+45s)
+      ];
+
+      hands.forEach((hand) => {
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(baseAngle + hand.offset);
+
+        // Sagoma lancetta da piscina ad alta visibilità
+        ctx.beginPath();
+        ctx.moveTo(0, -22);
+        ctx.lineTo(radius - 30, -7);
+        ctx.lineTo(radius - 4, 0);
+        ctx.lineTo(radius - 30, 7);
+        ctx.lineTo(0, 22);
+        ctx.closePath();
+
+        ctx.fillStyle = hand.color;
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#0f172a';
+        ctx.stroke();
+
+        ctx.restore();
+      });
+
+      // Perno centrale
+      ctx.beginPath();
+      ctx.arc(cx, cy, 36, 0, Math.PI * 2);
+      ctx.fillStyle = '#1e293b';
+      ctx.fill();
+      ctx.lineWidth = 7;
+      ctx.strokeStyle = '#f8fafc';
+      ctx.stroke();
+
+      requestAnimationFrame(drawClock);
+    }
+
+    requestAnimationFrame(drawClock);
+  </script>
+</body>
+</html>
